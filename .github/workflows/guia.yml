@@ -1,0 +1,39 @@
+# Arma la guía de programación de Tommy TV cada 6 horas y la publica en GitHub Pages.
+name: Guía de programación
+on:
+  schedule:
+    - cron: '20 0,6,12,18 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  guia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.publicar.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Armar la guía
+        run: node construir.mjs salida
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: salida
+      - id: publicar
+        uses: actions/deploy-pages@v4
+      # GitHub apaga las tareas programadas de un repositorio sin cambios en 60 días: esto la mantiene encendida
+      - name: Mantener encendida
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/guia.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}

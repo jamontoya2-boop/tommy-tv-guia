@@ -2,6 +2,8 @@
 // - Baja cada fuente, se queda con los programas de las próximas horas y escribe:
 //     salida/indice.json        → [fuente, número, nombres...] de cada canal con programación
 //     salida/p/<fuente>/<n>.json → programas de ese canal: [inicio (min), duración (min), título, descripción]
+//     salida/b/<abc>.json        → buscador: [fuente, número, título, [inicio, duración, …]] de lo que pasan en las próximas 36 h,
+//                                  repartido por las 3 primeras letras de cada palabra del título (la app baja solo un pedazo)
 // - Lee las fuentes como flujo (la de canales locales de EE. UU. pesa más de 500 MB sin comprimir).
 // Uso: node construir.mjs [carpeta-salida]
 import { createWriteStream, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -56,7 +58,11 @@ async function leerFuente(codigo) {
 }
 
 rmSync(SALIDA, { recursive: true, force: true });
-const indice = [], resumen = {};
+const indice = [], resumen = {}, buscador = new Map();
+// Igual que en la app: sin acentos, minúsculas, solo letras y números
+const palabras = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9ñ]+/).filter((w) => w.length >= 3 && !VACIAS.has(w));
+const VACIAS = new Set('the and los las del con por una que for with les des und una sus'.split(' '));
+const AHORA = Math.round(Date.now() / 60000);
 for (const [codigo, pais] of Object.entries(FUENTES)) {
   const t0 = Date.now();
   try {
@@ -70,6 +76,12 @@ for (const [codigo, pais] of Object.entries(FUENTES)) {
       const deId = id.replace(/\.[a-z_0-9]+$/i, '').replace(/[._]+/g, ' ').trim();
       indice.push([codigo, n, ...new Set([...nombres, deId])]);
       writeFileSync(`${SALIDA}/p/${codigo}/${n}.json`, JSON.stringify(ps));
+      const porTitulo = new Map();
+      for (const [ini, dur, titulo] of ps) if (ini + dur > AHORA && ini < AHORA + 36 * 60) (porTitulo.get(titulo) || porTitulo.set(titulo, []).get(titulo)).push(ini, dur);
+      for (const [titulo, horas] of porTitulo) {
+        const e = [codigo, n, titulo, horas];
+        for (const k of new Set(palabras(titulo).map((w) => w.slice(0, 3)))) (buscador.get(k) || buscador.set(k, []).get(k)).push(e);
+      }
       n++;
     }
     resumen[codigo] = { pais, canales: n, segundos: Math.round((Date.now() - t0) / 1000) };
@@ -78,6 +90,9 @@ for (const [codigo, pais] of Object.entries(FUENTES)) {
   }
   console.log(codigo.padEnd(15), JSON.stringify(resumen[codigo]));
 }
+mkdirSync(`${SALIDA}/b`, { recursive: true });
+for (const [k, v] of buscador) writeFileSync(`${SALIDA}/b/${encodeURIComponent(k)}.json`, JSON.stringify(v));
+console.log('buscador:', buscador.size, 'pedazos');
 writeFileSync(`${SALIDA}/indice.json`, JSON.stringify({ generado: Date.now(), fuentes: Object.fromEntries(Object.entries(FUENTES)), canales: indice }));
 writeFileSync(`${SALIDA}/estado.json`, JSON.stringify({ generado: new Date().toISOString(), resumen }, null, 1));
 console.log('canales con programación:', indice.length);
